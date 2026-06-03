@@ -1,0 +1,2 @@
+paramiko==3.5.1
+paho-mqtt==2.1.0
