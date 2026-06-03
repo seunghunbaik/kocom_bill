@@ -1,5 +1,5 @@
 name: Wallpad Fee Monitor
-version: "0.2.0"
+version: "0.2.1"
 slug: wallpad_fee_monitor
 description: Capture Kocom wallpad management-fee packets through Mango/OpenWrt and publish Home Assistant MQTT sensors.
 url: "https://github.com/your-name/wallpad-fee-monitor"

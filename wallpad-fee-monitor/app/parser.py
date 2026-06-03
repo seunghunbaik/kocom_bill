@@ -70,7 +70,7 @@ class FeeParser:
         if not match:
             return None
         month = match.group(0).decode("ascii")[:7]
-        values_start = match.end() + 4
+        values_start = match.end() + 8
         raw_values = []
         for offset in range(values_start, min(len(chunk), values_start + 28), 4):
             if offset + 4 <= len(chunk):
