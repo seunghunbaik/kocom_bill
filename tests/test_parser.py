@@ -5,10 +5,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "wallpad-fee-monitor" / "app"))
 
-from parser import FeeParser
+from parser import FeeParser, parse_hex_packets
 
 
 class FeeParserTest(unittest.TestCase):
+    def test_parse_hex_packets_accepts_commas_and_newlines(self):
+        packets = parse_hex_packets("7856, 3412\n0001")
+
+        self.assertEqual(packets, [bytes.fromhex("7856"), bytes.fromhex("3412"), bytes.fromhex("0001")])
+
     def test_parse_multiple_fee_records(self):
         payload = bytes.fromhex(
             "7856341238000002340000000000000021150000b00d000000000000"

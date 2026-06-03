@@ -1,5 +1,5 @@
 name: Wallpad Fee Monitor
-version: "0.1.0"
+version: "0.2.0"
 slug: wallpad_fee_monitor
 description: Capture Kocom wallpad management-fee packets through Mango/OpenWrt and publish Home Assistant MQTT sensors.
 url: "https://github.com/your-name/wallpad-fee-monitor"
@@ -29,6 +29,10 @@ options:
   mqtt_password: ""
   mqtt_discovery_prefix: "homeassistant"
   mqtt_topic_prefix: "wallpad/fee"
+  active_query_enabled: false
+  active_query_interval_hours: 24
+  active_query_startup_delay_seconds: 30
+  active_query_packets: ""
   log_level: "info"
 schema:
   mango_host: str
@@ -45,4 +49,8 @@ schema:
   mqtt_password: password
   mqtt_discovery_prefix: str
   mqtt_topic_prefix: str
+  active_query_enabled: bool
+  active_query_interval_hours: int
+  active_query_startup_delay_seconds: int
+  active_query_packets: str
   log_level: list(debug|info|warning|error)

@@ -53,6 +53,19 @@ It also publishes previous-month and before-previous-month values when present i
 
 The wallpad must refresh the fee screen for new packets to appear. The add-on only observes packets and republishes parsed values.
 
+## Optional Active Query
+
+By default, the add-on waits for the wallpad fee screen to refresh. You can enable an experimental active query that sends captured fee-query packet bytes through Mango once per interval.
+
+Options:
+
+- `active_query_enabled`: set to `true` to enable active refresh.
+- `active_query_interval_hours`: default `24`.
+- `active_query_startup_delay_seconds`: delay before the first query after add-on start.
+- `active_query_packets`: comma-separated or newline-separated hex payloads captured from wallpad fee-query requests.
+
+This is read-only in intent, but it still sends a query packet to the apartment server. Keep it disabled unless you have captured and verified the request packet for your wallpad.
+
 If no MQTT entities appear, check:
 
 - The add-on log for SSH or MQTT connection errors.

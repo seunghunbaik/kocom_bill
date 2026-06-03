@@ -3,6 +3,7 @@ import logging
 import signal
 import struct
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 import paramiko
 from paho.mqtt import client as mqtt
 
-from parser import FeeParser
+from parser import FeeParser, parse_hex_packets
 
 
 OPTIONS_PATH = Path("/data/options.json")
@@ -32,6 +33,10 @@ class Options:
     mqtt_password: str
     mqtt_discovery_prefix: str
     mqtt_topic_prefix: str
+    active_query_enabled: bool
+    active_query_interval_hours: int
+    active_query_startup_delay_seconds: int
+    active_query_packets: str
     log_level: str
 
 
@@ -161,6 +166,17 @@ class Publisher:
 
 
 def ssh_tcpdump(opts: Options):
+    ssh = ssh_connect(opts)
+    command = (
+        f"tcpdump -i {opts.mango_interface} -nn -s0 -U -w - "
+        f"'src host {opts.server_ip} and dst host {opts.wallpad_ip} and port {opts.server_port}'"
+    )
+    logging.info("Starting remote capture: %s", command)
+    _stdin, stdout, _stderr = ssh.exec_command(command, get_pty=False)
+    return ssh, stdout
+
+
+def ssh_connect(opts: Options):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(
@@ -172,23 +188,79 @@ def ssh_tcpdump(opts: Options):
         allow_agent=False,
         timeout=15,
     )
-    command = (
-        f"tcpdump -i {opts.mango_interface} -nn -s0 -U -w - "
-        f"'src host {opts.server_ip} and dst host {opts.wallpad_ip} and port {opts.server_port}'"
-    )
-    logging.info("Starting remote capture: %s", command)
-    _stdin, stdout, _stderr = ssh.exec_command(command, get_pty=False)
-    return ssh, stdout
+    return ssh
+
+
+def run_active_query_once(opts: Options, parser: FeeParser, publisher: Publisher):
+    packets = parse_hex_packets(opts.active_query_packets)
+    if not packets:
+        logging.warning("Active query is enabled, but active_query_packets is empty")
+        return
+
+    ssh = None
+    channel = None
+    try:
+        ssh = ssh_connect(opts)
+        transport = ssh.get_transport()
+        if not transport:
+            raise RuntimeError("SSH transport is not available")
+        channel = transport.open_channel(
+            "direct-tcpip",
+            (opts.server_ip, opts.server_port),
+            ("127.0.0.1", 0),
+        )
+        channel.settimeout(3)
+        logging.info("Sending %s active fee query packet(s)", len(packets))
+        for packet in packets:
+            channel.sendall(packet)
+            time.sleep(0.2)
+
+        received = bytearray()
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            try:
+                chunk = channel.recv(4096)
+            except TimeoutError:
+                continue
+            except Exception:
+                break
+            if not chunk:
+                break
+            received.extend(chunk)
+            parsed = parser.feed(bytes(received))
+            if parsed:
+                logging.info("Publishing active fee data: %s", parsed)
+                publisher.publish_state(parsed)
+                return
+        logging.warning("Active query completed without parsable fee data")
+    finally:
+        if channel:
+            channel.close()
+        if ssh:
+            ssh.close()
+
+
+def active_query_loop(opts: Options, parser: FeeParser, publisher: Publisher, stop_event):
+    delay = max(0, opts.active_query_startup_delay_seconds)
+    interval = max(1, opts.active_query_interval_hours) * 3600
+    if stop_event.wait(delay):
+        return
+    while not stop_event.is_set():
+        try:
+            run_active_query_once(opts, parser, publisher)
+        except Exception as exc:
+            logging.exception("Active query failed: %s", exc)
+        if stop_event.wait(interval):
+            return
 
 
 def main() -> int:
     opts = load_options()
     setup_logging(opts.log_level)
-    stop = False
+    stop_event = threading.Event()
 
     def handle_stop(_signum, _frame):
-        nonlocal stop
-        stop = True
+        stop_event.set()
 
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
@@ -198,14 +270,22 @@ def main() -> int:
     parser = FeeParser()
     src_ip = ip_to_bytes(opts.server_ip)
     dst_ip = ip_to_bytes(opts.wallpad_ip)
+    active_thread = None
+    if opts.active_query_enabled:
+        active_thread = threading.Thread(
+            target=active_query_loop,
+            args=(opts, parser, publisher, stop_event),
+            daemon=True,
+        )
+        active_thread.start()
 
-    while not stop:
+    while not stop_event.is_set():
         ssh = None
         try:
             ssh, stdout = ssh_tcpdump(opts)
             stream = PcapStream(stdout)
             for packet in stream.packets():
-                if stop:
+                if stop_event.is_set():
                     break
                 payload = tcp_payload_from_ethernet(packet, src_ip, dst_ip, opts.server_port)
                 if not payload:
@@ -221,6 +301,8 @@ def main() -> int:
             if ssh:
                 ssh.close()
 
+    if active_thread:
+        active_thread.join(timeout=5)
     publisher.stop()
     return 0
 

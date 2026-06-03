@@ -8,6 +8,18 @@ MAGIC = b"\x78\x56\x34\x12"
 DATE_RE = re.compile(rb"20\d{2}-\d{2}-00 00:00")
 
 
+def parse_hex_packets(raw: str) -> list[bytes]:
+    packets = []
+    for item in raw.replace("\n", ",").split(","):
+        cleaned = "".join(item.split())
+        if not cleaned:
+            continue
+        if len(cleaned) % 2:
+            raise ValueError(f"Hex packet has odd length: {cleaned}")
+        packets.append(bytes.fromhex(cleaned))
+    return packets
+
+
 @dataclass
 class FeeRecord:
     month: str
